@@ -172,18 +172,18 @@ func TestKeepFileName_MergesMetadata(t *testing.T) {
 	}
 }
 
-func TestA2APartConverter_DropsUnrecognisedDataPart(t *testing.T) {
-	// A DataPart with no recognised part-type metadata (e.g. a HITL decision
-	// payload like {decision_type: "approve"}) should be dropped silently.
+func TestA2APartConverter_UntypedDataPartBecomesJSONText(t *testing.T) {
+	// A DataPart with no part-type metadata is the caller's structured input. It
+	// reaches the model as JSON text, as in the Python adapter.
 	part, err := a2aPartConverter(
 		context.Background(), nil,
-		convDataPart(map[string]any{"decision_type": "approve"}, nil),
+		convDataPart(map[string]any{"pr": float64(3618), "risk": "low"}, nil),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if part != nil {
-		t.Fatalf("converted part = %#v, want nil", part)
+	if part == nil || part.Text != `{"pr":3618,"risk":"low"}` {
+		t.Fatalf("converted part = %#v, want JSON text", part)
 	}
 }
 

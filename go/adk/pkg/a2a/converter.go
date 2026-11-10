@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	a2atype "github.com/a2aproject/a2a-go/v2/a2a"
@@ -41,9 +42,14 @@ func a2aPartConverter(_ context.Context, _ a2atype.Event, part *a2atype.Part) (*
 		}
 	}
 
-	// DataPart with no recognised type metadata (e.g. {decision_type: "approve"}).
-	// Drop it — returning nil excludes it from the GenAI content, matching Python.
-	return nil, nil
+	// A DataPart with no type metadata is structured input from the caller. Pass it to
+	// the model as JSON text, as the Python adapter does. HITL responses travel in
+	// message metadata, not DataParts, so none of them reach this point.
+	b, err := json.Marshal(dp)
+	if err != nil {
+		return nil, err
+	}
+	return genai.NewPartFromText(string(b)), nil
 }
 
 // keepFileName copies a non-image file's name into PartMetadata, which survives ADK blanking DisplayName.
