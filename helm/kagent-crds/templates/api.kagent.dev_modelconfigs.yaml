@@ -179,6 +179,16 @@ spec:
                     - 5m
                     - 1h
                     type: string
+                  credentialType:
+                    description: |-
+                      CredentialType names what apiKeySecret holds. Omitted means APIKey.
+                      OAuthToken is a Claude subscription token from `claude setup-token`; the
+                      gateway sends it as `Authorization: Bearer <token>`. Only the Claude
+                      harness accepts OAuthToken, and it requires apiKeySecret.
+                    enum:
+                    - APIKey
+                    - OAuthToken
+                    type: string
                   maxTokens:
                     description: Maximum tokens to generate
                     type: integer
@@ -739,6 +749,9 @@ spec:
               rule: '!(has(self.tokenPassthrough) && self.tokenPassthrough && (self.provider
                 == ''Gemini'' || self.provider == ''GeminiVertexAI'' || self.provider
                 == ''AnthropicVertexAI''))'
+            - message: anthropic.credentialType OAuthToken requires apiKeySecret
+              rule: '!(has(self.anthropic) && has(self.anthropic.credentialType) &&
+                self.anthropic.credentialType == ''OAuthToken'' && !has(self.apiKeySecret))'
             - message: Bedrock requires AWS credentials and does not support actorJwt
               rule: '!has(self.actorJwt) || self.provider != ''Bedrock'''
             - message: actorJwt requires a provider with a configurable endpoint and
