@@ -38,6 +38,22 @@ func TestBedrockProviderJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeOAuthTokenRequiresClaudeHarness(t *testing.T) {
+	t.Run("Given an Anthropic ModelConfig with a Claude Code OAuth token, when the kagent harness compiles it, assert that compilation is rejected", func(t *testing.T) {
+		oauthToken := v1alpha3.AnthropicCredentialTypeClaudeCodeOAuthToken
+		resolved := &translator.ResolvedModelConfig{Config: &v1alpha3.ModelConfig{Spec: v1alpha3.ModelConfigSpec{
+			Provider: v1alpha3.ModelProviderAnthropic, Model: "claude", APIKeySecret: "subscription", APIKeySecretKey: "token",
+			Anthropic: &v1alpha3.AnthropicConfig{CredentialType: &oauthToken},
+		}}}
+
+		_, _, err := translateModel(resolved)
+
+		var validation *translator.ValidationError
+		require.ErrorAs(t, err, &validation)
+		require.ErrorContains(t, err, "only the Claude harness")
+	})
+}
+
 func TestRenderBedrockCredentialsFromReferences(t *testing.T) {
 	secret := types.NamespacedName{Namespace: "test", Name: "credentials"}
 	tests := []struct {

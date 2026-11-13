@@ -258,6 +258,9 @@ func modelCredentialTarget(resolved *ResolvedModelConfig) (name, endpoint, heade
 		}
 	case v1alpha3.ModelProviderAnthropic:
 		name, endpoint, header = env.AnthropicAPIKey.Name(), "https://api.anthropic.com", "x-api-key"
+		if ClaudeCodeOAuthToken(spec) {
+			name, header, prefix = env.ClaudeCodeOAuthToken.Name(), "authorization", "Bearer "
+		}
 		if spec.Anthropic != nil && spec.Anthropic.BaseURL != "" {
 			endpoint = spec.Anthropic.BaseURL
 		}
@@ -312,6 +315,13 @@ func modelCredentialTarget(resolved *ResolvedModelConfig) (name, endpoint, heade
 		}
 	}
 	return name, endpoint, header, prefix
+}
+
+// ClaudeCodeOAuthToken reports whether apiKeySecret holds a Claude Code OAuth
+// token, which only the Claude harness can use.
+func ClaudeCodeOAuthToken(spec v1alpha3.ModelConfigSpec) bool {
+	return spec.Provider == v1alpha3.ModelProviderAnthropic && spec.Anthropic != nil &&
+		ptr.Deref(spec.Anthropic.CredentialType, v1alpha3.AnthropicCredentialTypeAPIKey) == v1alpha3.AnthropicCredentialTypeClaudeCodeOAuthToken
 }
 
 // modelEndpoints returns every endpoint a model client calls, keyed or not.

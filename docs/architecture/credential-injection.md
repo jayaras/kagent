@@ -58,6 +58,7 @@ overrides of these variables are rejected.
 | --- | --- |
 | OpenAI API key | `authorization: Bearer <key>` |
 | Anthropic API key | `x-api-key: <key>` |
+| Claude Code OAuth token, Claude harness only | `authorization: Bearer <token>` |
 | Azure OpenAI and Foundry OpenAI API key | `api-key: <key>` |
 | Foundry Anthropic API key | `x-api-key: <key>` |
 | Gemini API key | `x-goog-api-key: <key>` |

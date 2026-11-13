@@ -12,6 +12,7 @@ import (
 func TestOwnsEnvironment(t *testing.T) {
 	for _, name := range []string{
 		AnthropicAPIKeyEnvName,
+		ClaudeCodeOAuthTokenEnvName,
 		ClaudeConfigDirEnvName,
 		MaxRetriesEnvName,
 		"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",

@@ -18,6 +18,7 @@ import (
 
 	configv1 "github.com/kagent-dev/kagent/go/api/gen/kagent/config/v1"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"github.com/kagent-dev/kagent/go/core/internal/egress"
 	"github.com/kagent-dev/kagent/go/core/internal/substrate"
 	"github.com/kagent-dev/kagent/go/core/internal/translator"
 	claudeconfig "github.com/kagent-dev/kagent/go/harness/claude/config"
@@ -181,6 +182,51 @@ func TestCompileRejectsProviderOwnedHarnessEnvironment(t *testing.T) {
 	if !errors.As(err, &validation) {
 		t.Fatalf("Compile() error = %v, want validation error", err)
 	}
+}
+
+func TestCompileClaudeCodeOAuthToken(t *testing.T) {
+	oauthToken := v1alpha3.AnthropicCredentialTypeClaudeCodeOAuthToken
+	model := v1alpha3.ModelConfigSpec{
+		Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-5",
+		APIKeySecret: "model-auth", APIKeySecretKey: "oauth-token",
+		Anthropic: &v1alpha3.AnthropicConfig{CacheTTL: "5m", CredentialType: &oauthToken},
+	}
+
+	t.Run("Given an Anthropic ModelConfig with a Claude Code OAuth token, when the agent compiles, assert that Claude Code receives only CLAUDE_CODE_OAUTH_TOKEN and the gateway sends it as a bearer token", func(t *testing.T) {
+		input, reader := testInput(t, model, map[string][]byte{"oauth-token": []byte(credentialValue)})
+
+		revision, err := NewCompiler(krt.TestingDummyContext{}, reader, testRuntimeDefaults()).Compile(context.Background(), input)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		environment := map[string]string{}
+		for _, variable := range revision.Environment {
+			environment[variable.Name] = variable.Value
+		}
+		if got := environment[claudeconfig.ClaudeCodeOAuthTokenEnvName]; got != translator.CredentialPlaceholder {
+			t.Errorf("environment[%s] = %q, want the gateway placeholder", claudeconfig.ClaudeCodeOAuthTokenEnvName, got)
+		}
+		if _, set := environment[claudeconfig.AnthropicAPIKeyEnvName]; set {
+			t.Errorf("environment sets %s, which Claude Code would prefer over the OAuth token", claudeconfig.AnthropicAPIKeyEnvName)
+		}
+		want := []egress.Credential{{Origin: "https://api.anthropic.com:443", Header: "authorization", Prefix: "Bearer ", URI: "ate-secret://k8s.io/default/test/model-auth/oauth-token"}}
+		if !reflect.DeepEqual(revision.Credentials, want) {
+			t.Errorf("credentials = %#v, want %#v", revision.Credentials, want)
+		}
+	})
+
+	t.Run("Given an Anthropic ModelConfig with a Claude Code OAuth token, when the Harness env also sets CLAUDE_CODE_OAUTH_TOKEN, assert that compilation is rejected", func(t *testing.T) {
+		input, reader := testInput(t, model, map[string][]byte{"oauth-token": []byte(credentialValue)})
+		input.Harness.Spec.Env = []v1alpha3.RuntimeEnvVar{{Name: claudeconfig.ClaudeCodeOAuthTokenEnvName, Value: "literal"}}
+
+		_, err := NewCompiler(krt.TestingDummyContext{}, reader, testRuntimeDefaults()).Compile(context.Background(), input)
+
+		var validation *translator.ValidationError
+		if !errors.As(err, &validation) || !strings.Contains(err.Error(), claudeconfig.ClaudeCodeOAuthTokenEnvName) {
+			t.Fatalf("Compile() error = %v, want a validation error naming %s", err, claudeconfig.ClaudeCodeOAuthTokenEnvName)
+		}
+	})
 }
 
 func TestCompileAllowsRuntimeOTELEndpoint(t *testing.T) {

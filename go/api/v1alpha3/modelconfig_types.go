@@ -190,7 +190,23 @@ type AnthropicConfig struct {
 	// +kubebuilder:validation:Enum="5m";"1h"
 	// +kubebuilder:default="5m"
 	CacheTTL string `json:"cacheTTL,omitempty"`
+
+	// CredentialType names what apiKeySecret holds. APIKey, the default, is an
+	// Anthropic API key. ClaudeCodeOAuthToken is a token that `claude setup-token`
+	// creates for a person's own Claude subscription. Only the Claude harness
+	// accepts it, and passes it to Claude Code as CLAUDE_CODE_OAUTH_TOKEN.
+	// +optional
+	CredentialType *AnthropicCredentialType `json:"credentialType,omitempty"`
 }
+
+// AnthropicCredentialType names the kind of Anthropic credential in apiKeySecret.
+// +kubebuilder:validation:Enum=APIKey;ClaudeCodeOAuthToken
+type AnthropicCredentialType string
+
+const (
+	AnthropicCredentialTypeAPIKey               AnthropicCredentialType = "APIKey"
+	AnthropicCredentialTypeClaudeCodeOAuthToken AnthropicCredentialType = "ClaudeCodeOAuthToken"
+)
 
 // Deferred until service-account credentials can be provided to the runtime:
 //
@@ -573,6 +589,7 @@ func (t *TLSConfig) IsEmpty() bool {
 // +kubebuilder:validation:XValidation:message="apiKeySecretKey must be set if apiKeySecret is set (except for Bedrock and SAPAICore providers)",rule="!(has(self.apiKeySecret) && !has(self.apiKeySecretKey) && self.provider != 'Bedrock' && self.provider != 'SAPAICore')"
 // +kubebuilder:validation:XValidation:message="tokenPassthrough must be false if provider is Gemini;GeminiVertexAI;AnthropicVertexAI",rule="!(has(self.tokenPassthrough) && self.tokenPassthrough && (self.provider == 'Gemini' || self.provider == 'GeminiVertexAI' || self.provider == 'AnthropicVertexAI'))"
 // +kubebuilder:validation:AtMostOneOf=actorJwt;apiKeySecret;tokenPassthrough
+// +kubebuilder:validation:XValidation:message="anthropic.credentialType ClaudeCodeOAuthToken requires apiKeySecret",rule="!(has(self.anthropic) && has(self.anthropic.credentialType) && self.anthropic.credentialType == 'ClaudeCodeOAuthToken' && !has(self.apiKeySecret))"
 // +kubebuilder:validation:XValidation:message="Bedrock requires AWS credentials and does not support actorJwt",rule="!has(self.actorJwt) || self.provider != 'Bedrock'"
 // +kubebuilder:validation:XValidation:message="actorJwt requires a provider with a configurable endpoint and header credentials",rule="!has(self.actorJwt) || (!(self.provider in ['Ollama', 'GeminiVertexAI', 'AnthropicVertexAI', 'SAPAICore']))"
 type ModelConfigSpec struct {

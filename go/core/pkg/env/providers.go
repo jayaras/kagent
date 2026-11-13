@@ -36,6 +36,13 @@ var (
 		"API key for Anthropic.",
 		ComponentAgentRuntime, ComponentCLI,
 	)
+
+	ClaudeCodeOAuthToken = RegisterStringVar(
+		"CLAUDE_CODE_OAUTH_TOKEN",
+		"",
+		"Claude Code OAuth token for a Claude subscription, used by the Claude harness.",
+		ComponentAgentRuntime,
+	)
 )
 
 // Azure OpenAI

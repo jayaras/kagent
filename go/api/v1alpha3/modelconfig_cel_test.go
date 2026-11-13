@@ -360,4 +360,27 @@ func TestOpenAIConfigValidation(t *testing.T) {
 			require.Equal(t, new(tc.want), stored.Spec.Stream)
 		})
 	}
+
+	oauthToken := AnthropicCredentialTypeClaudeCodeOAuthToken
+	for _, scenario := range []struct {
+		name, secret, wantReject string
+	}{
+		{"Given an Anthropic ModelConfig, when it names a Claude Code OAuth token in apiKeySecret, assert that admission accepts it", "claude-subscription", ""},
+		{"Given an Anthropic ModelConfig, when it names a Claude Code OAuth token without apiKeySecret, assert that admission rejects it", "", "anthropic.credentialType ClaudeCodeOAuthToken requires apiKeySecret"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			spec := ModelConfigSpec{Model: "claude", Provider: ModelProviderAnthropic, Anthropic: &AnthropicConfig{CredentialType: &oauthToken}}
+			if scenario.secret != "" {
+				spec.APIKeySecret, spec.APIKeySecretKey = scenario.secret, "token"
+			}
+
+			err := cl.Create(ctx, &ModelConfig{ObjectMeta: metav1.ObjectMeta{GenerateName: "anthropic-oauth-", Namespace: ns}, Spec: spec})
+
+			if scenario.wantReject == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, scenario.wantReject)
+			}
+		})
+	}
 }

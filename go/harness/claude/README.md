@@ -20,7 +20,7 @@ harness.
 
 ## Working
 
-- [x] Anthropic API keys and Amazon Bedrock bearer tokens, injected by the gateway
+- [x] Anthropic API keys, Claude Code OAuth tokens, and Amazon Bedrock bearer tokens, injected by the gateway
 - [x] Streaming text, tool calls, and tool results over A2A
 - [x] Task cancellation
 - [x] Durable Claude session resume between turns
@@ -34,6 +34,15 @@ harness.
 Credentials use [Substrate gateway injection](../../../docs/architecture/credential-injection.md).
 AWS IAM keys and Vertex service-account keys require local signing and are rejected
 by the compiler. Harness environment entries accept only literal values.
+
+To run Claude Code on your own Claude subscription, create a token with
+`claude setup-token`, store it in a Secret, and reference it from an Anthropic
+ModelConfig with `apiKeySecret`, `apiKeySecretKey`, and
+`anthropic.credentialType: ClaudeCodeOAuthToken`. The compiler then sets
+`CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`, and the gateway sends
+the token as `authorization: Bearer <token>`. The token belongs to one person, so
+use it only for agents that person runs. The kagent harness rejects this
+credential type.
 
 Production runs retain Claude's native retry defaults. E2E fixtures opt into
 zero retries through an internal test switch while upstream denial handling

@@ -179,6 +179,16 @@ spec:
                     - 5m
                     - 1h
                     type: string
+                  credentialType:
+                    description: |-
+                      CredentialType names what apiKeySecret holds. APIKey, the default, is an
+                      Anthropic API key. ClaudeCodeOAuthToken is a token that `claude setup-token`
+                      creates for a person's own Claude subscription. Only the Claude harness
+                      accepts it, and passes it to Claude Code as CLAUDE_CODE_OAUTH_TOKEN.
+                    enum:
+                    - APIKey
+                    - ClaudeCodeOAuthToken
+                    type: string
                   maxTokens:
                     description: Maximum tokens to generate
                     type: integer
@@ -739,6 +749,9 @@ spec:
               rule: '!(has(self.tokenPassthrough) && self.tokenPassthrough && (self.provider
                 == ''Gemini'' || self.provider == ''GeminiVertexAI'' || self.provider
                 == ''AnthropicVertexAI''))'
+            - message: anthropic.credentialType ClaudeCodeOAuthToken requires apiKeySecret
+              rule: '!(has(self.anthropic) && has(self.anthropic.credentialType) &&
+                self.anthropic.credentialType == ''ClaudeCodeOAuthToken'' && !has(self.apiKeySecret))'
             - message: Bedrock requires AWS credentials and does not support actorJwt
               rule: '!has(self.actorJwt) || self.provider != ''Bedrock'''
             - message: actorJwt requires a provider with a configurable endpoint and
