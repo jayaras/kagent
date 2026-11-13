@@ -85,12 +85,25 @@ configure refresh according to their identity provider's requirements.
 
 ## Controller identity
 
-The [ProxyAuthenticator](../../go/core/internal/httpserver/auth/proxy_authn.go)
-implementation parses bearer JWT claims without verifying signatures. It rejects
-malformed or expired `exp` claims when present, including before forwarding the
-credential. It assumes an upstream boundary already validated the signature,
-issuer, audience, and other required claims.
-The shipped controller selects it in `trusted-proxy` mode.
+The shipped controller selects the
+[ProxyAuthenticator](../../go/core/internal/httpserver/auth/proxy_authn.go) in
+`trusted-proxy` mode. How it treats a bearer JWT depends on
+`config.server.auth.trustedIssuers`.
+
+With trusted issuers configured, the controller fetches each issuer's OIDC
+discovery document and signing keys at startup and refreshes the keys every
+minute. Startup fails if an issuer is unreachable or its discovery document names
+a different issuer. A token must name a configured issuer in `iss`, be signed by
+one of that issuer's keys, carry one of its configured audiences in `aud`, and
+have an unexpired `exp`. The controller rejects every other token, including
+tokens from unlisted issuers. With oauth2-proxy, the forwarded token is usually
+the ID token, so its audience is the proxy's OIDC client ID.
+
+Without trusted issuers, the authenticator decodes claims without verifying the
+signature, issuer, or audience, as earlier releases did, and the controller logs
+a warning at startup. It still rejects a malformed or expired `exp` claim when
+present, including before forwarding the credential. An upstream boundary must
+have verified everything else.
 
 For a direct user request, identity comes from the configured user-ID claim,
 defaulting to `sub`. A missing custom claim falls back to `sub`; a missing user
@@ -156,6 +169,7 @@ differs.
 | `oauth2-proxy.config.existingSecret` | Empty | Reference client and cookie credentials |
 | `config.server.auth.mode` | `insecure` | Select `insecure` or `trusted-proxy` |
 | `config.server.auth.userIdClaim` | Empty (`sub`) | JWT identity claim, falling back to `sub` |
+| `config.server.auth.trustedIssuers` | Unset | OIDC issuers and audiences the controller verifies bearer JWTs against |
 | `config.server.auth.serviceAccount` | Unset | Opt in to local TokenReview authentication with a configured authority |
 | `ui.auth.ssoRedirectPath` | `/oauth2/start` | Start or restart browser sign-in |
 
@@ -171,6 +185,9 @@ config:
     auth:
       mode: trusted-proxy
       userIdClaim: email
+      trustedIssuers:
+        - issuer: https://id.example.com/realms/agents
+          audiences: [kagent-oauth2-proxy-client-id]
 controller:
   service:
     type: ClusterIP
@@ -205,9 +222,12 @@ to render the login page.
 ## Trust boundary
 
 The proxy validates external credentials and manages the HttpOnly session
-cookie. A backend using `ProxyAuthenticator` trusts that validation; decoding
-claims does not verify a token. Such a deployment must prevent callers from
-bypassing the proxy or supplying trusted internal identity headers directly.
+cookie. With trusted issuers configured, the controller also verifies each bearer
+JWT, so a caller that bypasses the proxy still needs a token that a trusted issuer
+signed for a kagent audience. Without trusted issuers, the controller trusts the
+proxy's validation, and the deployment must prevent callers from bypassing the
+proxy. In both cases, callers must not be able to supply trusted internal identity
+headers directly.
 
 The [UI nginx configuration](../../helm/kagent/files/nginx.conf) preserves
 `Authorization` while proxying API requests. It clears its listed
@@ -217,11 +237,13 @@ by `ui.additionalForwardedHeaders`. In `trusted-proxy` mode it always clears
 as defense in depth; the authenticator does not accept them as Actor identity.
 
 The chart does not install a dedicated NetworkPolicy enforcing this boundary.
-Operators must restrict UI ingress to the proxy and controller ingress to UI
+Without trusted issuers, operators must restrict UI ingress to the proxy and controller ingress to UI
 nginx and explicitly trusted internal workloads, using NetworkPolicy enforced
 by the cluster's network plugin or equivalent isolation. ClusterIP alone does
 not prevent bypass from another pod. Keep native gRPC, runtime methods, and
 the controller's direct HTTP/MCP listener private. Trusted internal callers
-must validate user credentials before forwarding them. `ProxyAuthenticator`
-rejects an expired `exp` claim, but it does not verify signatures or require an
-expiry claim. These checks do not replace upstream credential verification.
+must validate user credentials before forwarding them. Without trusted issuers,
+`ProxyAuthenticator` rejects an expired `exp` claim, but it does not verify
+signatures or require an expiry claim, so these checks do not replace upstream
+credential verification. Configure trusted issuers to verify tokens in the
+controller as well.

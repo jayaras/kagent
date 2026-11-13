@@ -21,9 +21,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	configv1 "github.com/kagent-dev/kagent/go/api/gen/kagent/config/v1"
 	authimpl "github.com/kagent-dev/kagent/go/core/internal/httpserver/auth"
@@ -84,7 +86,7 @@ func run(path string, check bool, level string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	authenticator, err := controllerAuthenticator(cfg.GetServer().GetAuth().GetMode(), cfg.GetServer().GetAuth().GetUserIdClaim())
+	authenticator, err := controllerAuthenticator(ctx, cfg.GetServer().GetAuth())
 	if err != nil {
 		return err
 	}
@@ -98,14 +100,26 @@ func run(path string, check bool, level string) error {
 	return nil
 }
 
-func controllerAuthenticator(mode, userIDClaim string) (auth.AuthProvider, error) {
-	switch mode {
+func controllerAuthenticator(ctx context.Context, cfg *configv1.AuthenticationConfig) (auth.AuthProvider, error) {
+	switch cfg.GetMode() {
 	case "insecure":
 		return &authimpl.InsecureAuthenticator{}, nil
 	case "trusted-proxy":
-		return authimpl.NewProxyAuthenticator(userIDClaim), nil
+		if len(cfg.GetTrustedIssuers()) == 0 {
+			slog.Default().WarnContext(ctx, "trusted-proxy mode decodes bearer JWTs without verifying them; set server.auth.trustedIssuers to verify signatures and audiences")
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		issuers := make([]*authimpl.TrustedIssuer, 0, len(cfg.GetTrustedIssuers()))
+		for _, trusted := range cfg.GetTrustedIssuers() {
+			issuer, err := authimpl.NewTrustedIssuer(ctx, client, trusted.GetIssuer(), trusted.GetAudiences())
+			if err != nil {
+				return nil, err
+			}
+			issuers = append(issuers, issuer)
+		}
+		return authimpl.NewProxyAuthenticator(cfg.GetUserIdClaim(), issuers...), nil
 	default:
-		return nil, fmt.Errorf("unsupported server.auth.mode %q", mode)
+		return nil, fmt.Errorf("unsupported server.auth.mode %q", cfg.GetMode())
 	}
 }
 

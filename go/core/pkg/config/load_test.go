@@ -182,6 +182,35 @@ func TestDatabaseLogins(t *testing.T) {
 	}
 }
 
+func TestTrustedIssuers(t *testing.T) {
+	const proxy = "server: {auth: {mode: trusted-proxy, trustedIssuers: "
+	scenarios := []struct {
+		name, input, wantErr string
+	}{
+		{"Given trusted-proxy mode, when an HTTPS issuer with an audience is configured, assert that the config is valid", proxy + "[{issuer: 'https://id.example', audiences: [kagent]}]}}", ""},
+		{"Given insecure mode, when a trusted issuer is configured, assert that the config is rejected", "server: {auth: {trustedIssuers: [{issuer: 'https://id.example', audiences: [kagent]}]}}", "requires mode trusted-proxy"},
+		{"Given trusted-proxy mode, when an issuer is configured without audiences, assert that the config is rejected", proxy + "[{issuer: 'https://id.example'}]}}", "audiences"},
+		{"Given trusted-proxy mode, when an HTTP issuer is configured, assert that the config is rejected", proxy + "[{issuer: 'http://id.example', audiences: [kagent]}]}}", "issuer"},
+		{"Given trusted-proxy mode, when one issuer is configured twice, assert that the config is rejected", proxy + "[{issuer: 'https://id.example', audiences: [a]}, {issuer: 'https://id.example', audiences: [b]}]}}", "must not repeat"},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			cfg := &configv1.ControllerConfig{}
+			require.NoError(t, config.Decode([]byte(scenario.input), cfg))
+			config.DefaultController(cfg)
+			setLogins(cfg)
+
+			err := config.Validate(cfg)
+
+			if scenario.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, scenario.wantErr)
+			}
+		})
+	}
+}
+
 func TestDefaultingUsesProtoPresence(t *testing.T) {
 	for _, tc := range []struct {
 		name, input    string

@@ -16,13 +16,20 @@ var ErrUnauthenticated = errors.New("unauthenticated: missing or invalid Authori
 
 type ProxyAuthenticator struct {
 	userIDClaim string
+	// issuers holds the trusted issuers by issuer URL. When it is empty, claims
+	// are decoded without verification and the proxy must have verified them.
+	issuers map[string]*TrustedIssuer
 }
 
-func NewProxyAuthenticator(userIDClaim string) *ProxyAuthenticator {
+func NewProxyAuthenticator(userIDClaim string, issuers ...*TrustedIssuer) *ProxyAuthenticator {
 	if userIDClaim == "" {
 		userIDClaim = "sub"
 	}
-	return &ProxyAuthenticator{userIDClaim: userIDClaim}
+	byURL := make(map[string]*TrustedIssuer, len(issuers))
+	for _, issuer := range issuers {
+		byURL[issuer.issuer] = issuer
+	}
+	return &ProxyAuthenticator{userIDClaim: userIDClaim, issuers: byURL}
 }
 
 func (a *ProxyAuthenticator) Authenticate(ctx context.Context, reqHeaders http.Header, query url.Values) (auth.Session, error) {
@@ -36,9 +43,8 @@ func (a *ProxyAuthenticator) Authenticate(ctx context.Context, reqHeaders http.H
 		return nil, ErrUnauthenticated
 	}
 
-	// The configured trusted proxy must verify this credential before forwarding it.
 	// Kubernetes credentials are independently verified by ServiceAccountProvider.
-	rawClaims, err := parseJWTPayload(tokenString)
+	rawClaims, err := a.claims(ctx, tokenString)
 	if err != nil {
 		return nil, ErrUnauthenticated
 	}
@@ -67,6 +73,21 @@ func (a *ProxyAuthenticator) Authenticate(ctx context.Context, reqHeaders http.H
 
 func (a *ProxyAuthenticator) UpstreamAuth(r *http.Request, session auth.Session, destinationSessionID string) error {
 	return auth.ForwardCredential(r, session)
+}
+
+// claims verifies the token against its trusted issuer. Without trusted issuers,
+// the configured proxy must verify the token before forwarding it.
+func (a *ProxyAuthenticator) claims(ctx context.Context, tokenString string) (map[string]any, error) {
+	claims, err := parseJWTPayload(tokenString)
+	if err != nil || len(a.issuers) == 0 {
+		return claims, err
+	}
+	iss, _ := claims["iss"].(string)
+	issuer, ok := a.issuers[iss]
+	if !ok {
+		return nil, ErrUnauthenticated
+	}
+	return issuer.verify(ctx, tokenString)
 }
 
 // parseJWTPayload parses JWT claims without signature verification. Callers must

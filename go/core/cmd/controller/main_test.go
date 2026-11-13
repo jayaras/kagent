@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	configv1 "github.com/kagent-dev/kagent/go/api/gen/kagent/config/v1"
 	authimpl "github.com/kagent-dev/kagent/go/core/internal/httpserver/auth"
 	"github.com/kagent-dev/kagent/go/core/pkg/auth"
 )
@@ -56,7 +57,7 @@ func TestControllerAuthenticator(t *testing.T) {
 		{name: "empty mode", mode: "", wantConfigError: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			authenticator, err := controllerAuthenticator(tt.mode, tt.claim)
+			authenticator, err := controllerAuthenticator(t.Context(), &configv1.AuthenticationConfig{Mode: &tt.mode, UserIdClaim: tt.claim})
 			if tt.wantConfigError {
 				require.ErrorContains(t, err, "server.auth.mode")
 				require.Nil(t, authenticator)

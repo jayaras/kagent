@@ -301,9 +301,10 @@ default.
 
 Follow the [OIDC deployment configuration](../docs/architecture/oidc-proxy-authentication.md#deployment-configuration)
 for provider credentials, callback URL, proxy ingress, and required network
-isolation. The trusted controller decodes claims without verifying signatures
-or expiry, so all public API, A2A, and MCP traffic must pass through the validating
-proxy and UI nginx.
+isolation. Set `config.server.auth.trustedIssuers` to have the controller verify
+each bearer JWT's signature, issuer, audience, and expiry. Without it, the
+controller decodes claims without verifying signatures, so all public API, A2A,
+and MCP traffic must pass through the validating proxy and UI nginx.
 
 #### Selecting a Substrate sandbox
 

@@ -158,6 +158,12 @@ config:
   server:
     auth:
       mode: insecure
+      # In trusted-proxy mode, verify bearer JWTs against these OIDC issuers.
+      # A token must be signed by a listed issuer and carry one of its audiences.
+      # When unset, the controller decodes claims without verifying them.
+      # trustedIssuers:
+      #   - issuer: https://id.example.com/realms/agents
+      #     audiences: [kagent]
       # Opt in to Kubernetes TokenReview authentication independently of the mode.
       # serviceAccount:
       #   authority: kubernetes

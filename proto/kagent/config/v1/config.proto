@@ -152,6 +152,16 @@ message ControllerServerConfig {
 }
 
 message AuthenticationConfig {
+  option (buf.validate.message).cel = {
+    id: "auth.trusted_issuers_mode"
+    message: "trusted_issuers requires mode trusted-proxy"
+    expression: "size(this.trusted_issuers) == 0 || this.mode == 'trusted-proxy'"
+  };
+  option (buf.validate.message).cel = {
+    id: "auth.trusted_issuers_unique"
+    message: "trusted_issuers must not repeat an issuer"
+    expression: "this.trusted_issuers.map(i, i.issuer).unique()"
+  };
   optional string mode = 1 [(buf.validate.field).string = {
     in: [
       "insecure",
@@ -160,6 +170,26 @@ message AuthenticationConfig {
   }];
   string user_id_claim = 2;
   ServiceAccountAuthentication service_account = 3;
+  // In trusted-proxy mode, bearer JWTs must be signed by one of these issuers
+  // and carry one of its audiences. When empty, claims are decoded without
+  // verification and the proxy must have verified them.
+  repeated TrustedIssuer trusted_issuers = 4;
+}
+
+// TrustedIssuer is an OIDC issuer whose signing keys come from discovery.
+message TrustedIssuer {
+  // Must equal the token's iss claim and the discovery document's issuer.
+  string issuer = 1 [(buf.validate.field).string = {
+    uri: true
+    prefix: "https://"
+  }];
+  // A token must carry at least one of these aud values.
+  repeated string audiences = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      string: {min_len: 1}
+    }
+  }];
 }
 
 // Platform-owned invocation authentication for the fixed kagent-invocation audience,
