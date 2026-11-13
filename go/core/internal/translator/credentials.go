@@ -15,6 +15,7 @@ import (
 	"github.com/kagent-dev/kagent/go/core/internal/egress"
 	"github.com/kagent-dev/kagent/go/core/pkg/egresspolicy"
 	"github.com/kagent-dev/kagent/go/core/pkg/env"
+	claudeconfig "github.com/kagent-dev/kagent/go/harness/claude/config"
 )
 
 // CredentialPlaceholder satisfies SDKs that require a configured API key.
@@ -258,6 +259,9 @@ func modelCredentialTarget(resolved *ResolvedModelConfig) (name, endpoint, heade
 		}
 	case v1alpha3.ModelProviderAnthropic:
 		name, endpoint, header = env.AnthropicAPIKey.Name(), "https://api.anthropic.com", "x-api-key"
+		if AnthropicOAuthToken(spec) {
+			name, header, prefix = claudeconfig.OAuthTokenEnvName, "authorization", "Bearer "
+		}
 		if spec.Anthropic != nil && spec.Anthropic.BaseURL != "" {
 			endpoint = spec.Anthropic.BaseURL
 		}
@@ -312,6 +316,13 @@ func modelCredentialTarget(resolved *ResolvedModelConfig) (name, endpoint, heade
 		}
 	}
 	return name, endpoint, header, prefix
+}
+
+// AnthropicOAuthToken reports whether an Anthropic model's apiKeySecret holds
+// a Claude subscription OAuth token rather than an API key.
+func AnthropicOAuthToken(spec v1alpha3.ModelConfigSpec) bool {
+	return spec.Provider == v1alpha3.ModelProviderAnthropic && spec.Anthropic != nil &&
+		spec.Anthropic.CredentialType == v1alpha3.AnthropicCredentialTypeOAuthToken
 }
 
 // modelEndpoints returns every endpoint a model client calls, keyed or not.

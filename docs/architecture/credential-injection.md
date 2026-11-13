@@ -58,11 +58,20 @@ overrides of these variables are rejected.
 | --- | --- |
 | OpenAI API key | `authorization: Bearer <key>` |
 | Anthropic API key | `x-api-key: <key>` |
+| Claude subscription OAuth token (`anthropic.credentialType: OAuthToken`, Claude harness only) | `authorization: Bearer <token>` |
 | Azure OpenAI and Foundry OpenAI API key | `api-key: <key>` |
 | Foundry Anthropic API key | `x-api-key: <key>` |
 | Gemini API key | `x-goog-api-key: <key>` |
 | Bedrock bearer token | `authorization: Bearer <token>` |
 | RemoteMCPServer Secret-backed header | Configured header; Secret contains its full value |
+
+An Anthropic ModelConfig whose `anthropic.credentialType` is `OAuthToken` holds
+a long-lived token from `claude setup-token` in `apiKeySecret`. The Claude
+compiler gives Claude Code the placeholder as `CLAUDE_CODE_OAUTH_TOKEN` instead
+of `ANTHROPIC_API_KEY`, and the gateway replaces it in the `Authorization`
+header. The option requires `apiKeySecret`, so it excludes `actorJwt` and
+`tokenPassthrough`. The kagent harness rejects it because the ADK Anthropic
+clients send API keys only; Codex does not support the Anthropic provider.
 
 Provider endpoint overrides determine the allowed HTTP(S) origin. Egress rules
 and credential bindings both match its scheme, DNS name, and port. Different

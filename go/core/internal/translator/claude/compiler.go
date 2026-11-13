@@ -191,24 +191,31 @@ func (c *Compiler) provider(ctx context.Context, resolved *translator.ResolvedMo
 	}
 	switch model.Spec.Provider {
 	case v1alpha3.ModelProviderAnthropic:
+		credentialName := claudeconfig.AnthropicAPIKeyEnvName
+		if translator.AnthropicOAuthToken(model.Spec) {
+			if model.Spec.ActorJWT != nil {
+				return nil, nil, translator.NewValidationError("anthropic.credentialType OAuthToken requires apiKeySecret")
+			}
+			credentialName = claudeconfig.OAuthTokenEnvName
+		}
 		var baseURL string
 		if model.Spec.Anthropic != nil {
 			options := *model.Spec.Anthropic
 			baseURL = strings.TrimSpace(options.BaseURL)
-			options.BaseURL = ""
+			options.BaseURL, options.CredentialType = "", ""
 			// "5m" is the CRD default and matches Claude Code's native cache TTL.
 			if options.CacheTTL == "5m" {
 				options.CacheTTL = ""
 			}
 			if !reflect.DeepEqual(options, v1alpha3.AnthropicConfig{}) {
-				return nil, nil, translator.NewValidationError("Claude does not support Anthropic provider options beyond baseUrl yet")
+				return nil, nil, translator.NewValidationError("Claude does not support Anthropic provider options beyond baseUrl and credentialType yet")
 			}
 		}
 		if model.Spec.ActorJWT == nil {
 			if err := c.requireSecretKey(ctx, model, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey, false); err != nil {
 				return nil, nil, err
 			}
-			credential = secretEnvironment(claudeconfig.AnthropicAPIKeyEnvName, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey)
+			credential = secretEnvironment(credentialName, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey)
 		}
 		environment := []corev1.EnvVar{credential}
 		egress := []string{"https://api.anthropic.com:443"}

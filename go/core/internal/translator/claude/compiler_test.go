@@ -18,6 +18,7 @@ import (
 
 	configv1 "github.com/kagent-dev/kagent/go/api/gen/kagent/config/v1"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"github.com/kagent-dev/kagent/go/core/internal/egress"
 	"github.com/kagent-dev/kagent/go/core/internal/substrate"
 	"github.com/kagent-dev/kagent/go/core/internal/translator"
 	claudeconfig "github.com/kagent-dev/kagent/go/harness/claude/config"
@@ -28,12 +29,13 @@ const credentialValue = "credential-must-not-be-serialized"
 
 func TestCompileProviderCredentials(t *testing.T) {
 	tests := []struct {
-		name       string
-		model      v1alpha3.ModelConfigSpec
-		secretData map[string][]byte
-		wantEnv    map[string]string
-		wantEgress []string
-		wantErr    string
+		name            string
+		model           v1alpha3.ModelConfigSpec
+		secretData      map[string][]byte
+		wantEnv         map[string]string
+		wantEgress      []string
+		wantCredentials []egress.Credential
+		wantErr         string
 	}{
 		{
 			name: "Actor JWT Anthropic", model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude", ActorJWT: &v1alpha3.ActorJWT{Audiences: []string{"model"}}},
@@ -50,6 +52,37 @@ func TestCompileProviderCredentials(t *testing.T) {
 			secretData: map[string][]byte{"api-key": []byte(credentialValue)},
 			wantEnv:    map[string]string{claudeconfig.AnthropicAPIKeyEnvName: translator.CredentialPlaceholder},
 			wantEgress: []string{"http://kagent-controller.kagent:8083", "https://api.anthropic.com:443"},
+			wantCredentials: []egress.Credential{{Origin: "https://api.anthropic.com:443", Header: "x-api-key",
+				URI: "ate-secret://k8s.io/default/test/model-auth/api-key"}},
+		},
+		{
+			name: "Anthropic subscription OAuth token",
+			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-5",
+				APIKeySecret: "model-auth", APIKeySecretKey: "oauth-token",
+				Anthropic: &v1alpha3.AnthropicConfig{CredentialType: v1alpha3.AnthropicCredentialTypeOAuthToken, CacheTTL: "5m"}},
+			secretData: map[string][]byte{"oauth-token": []byte(credentialValue)},
+			wantEnv:    map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": translator.CredentialPlaceholder, "ANTHROPIC_API_KEY": ""},
+			wantEgress: []string{"http://kagent-controller.kagent:8083", "https://api.anthropic.com:443"},
+			wantCredentials: []egress.Credential{{Origin: "https://api.anthropic.com:443", Header: "authorization", Prefix: "Bearer ",
+				URI: "ate-secret://k8s.io/default/test/model-auth/oauth-token"}},
+		},
+		{
+			name: "Anthropic subscription OAuth token through a gateway",
+			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-5",
+				APIKeySecret: "model-auth", APIKeySecretKey: "oauth-token",
+				Anthropic: &v1alpha3.AnthropicConfig{BaseURL: "https://llm.example.com/anthropic", CredentialType: v1alpha3.AnthropicCredentialTypeOAuthToken}},
+			secretData: map[string][]byte{"oauth-token": []byte(credentialValue)},
+			wantEnv: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": translator.CredentialPlaceholder, "ANTHROPIC_API_KEY": "",
+				claudeconfig.AnthropicBaseURLEnvName: "https://llm.example.com/anthropic"},
+			wantEgress: []string{"http://kagent-controller.kagent:8083", "https://llm.example.com:443"},
+			wantCredentials: []egress.Credential{{Origin: "https://llm.example.com:443", Header: "authorization", Prefix: "Bearer ",
+				URI: "ate-secret://k8s.io/default/test/model-auth/oauth-token"}},
+		},
+		{
+			name: "Anthropic subscription OAuth token with Actor JWT",
+			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude", ActorJWT: &v1alpha3.ActorJWT{Audiences: []string{"model"}},
+				Anthropic: &v1alpha3.AnthropicConfig{CredentialType: v1alpha3.AnthropicCredentialTypeOAuthToken}},
+			wantErr: "anthropic.credentialType OAuthToken requires apiKeySecret",
 		},
 		{
 			name: "Anthropic gateway",
@@ -124,6 +157,9 @@ func TestCompileProviderCredentials(t *testing.T) {
 			}
 			if !reflect.DeepEqual(revision.EgressDestinations, tt.wantEgress) {
 				t.Errorf("egress = %v", revision.EgressDestinations)
+			}
+			if tt.wantCredentials != nil && !reflect.DeepEqual(revision.Credentials, tt.wantCredentials) {
+				t.Errorf("credentials = %#v, want %#v", revision.Credentials, tt.wantCredentials)
 			}
 			if bytes.Contains(revision.ConfigJSON, []byte(credentialValue)) || bytes.Contains(revision.Provenance, []byte(credentialValue)) {
 				t.Fatal("compiled config or provenance contains credential material")

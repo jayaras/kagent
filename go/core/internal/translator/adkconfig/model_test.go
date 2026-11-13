@@ -272,6 +272,32 @@ func TestTranslateAnthropicPromptCaching(t *testing.T) {
 	}
 }
 
+func TestTranslateAnthropicCredentialType(t *testing.T) {
+	translate := func(credentialType v1alpha3.AnthropicCredentialType) (*modelDeploymentData, error) {
+		_, data, err := translateModel(&translator.ResolvedModelConfig{Config: &v1alpha3.ModelConfig{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "test"},
+			Spec: v1alpha3.ModelConfigSpec{
+				Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-6",
+				APIKeySecret: "auth", APIKeySecretKey: "token",
+				Anthropic: &v1alpha3.AnthropicConfig{CredentialType: credentialType},
+			},
+		}})
+		return data, err
+	}
+	t.Run("Given an Anthropic API key Secret, when the ADK model is translated, assert that it reads ANTHROPIC_API_KEY", func(t *testing.T) {
+		data, err := translate(v1alpha3.AnthropicCredentialTypeAPIKey)
+		require.NoError(t, err)
+		require.Len(t, data.EnvVars, 1)
+		require.Equal(t, "ANTHROPIC_API_KEY", data.EnvVars[0].Name)
+	})
+	t.Run("Given a Claude subscription OAuth token Secret, when the ADK model is translated, assert that it is rejected", func(t *testing.T) {
+		_, err := translate(v1alpha3.AnthropicCredentialTypeOAuthToken)
+		require.ErrorContains(t, err, "anthropic.credentialType OAuthToken is supported only by the Claude harness")
+		var validation *translator.ValidationError
+		require.ErrorAs(t, err, &validation, "the controller reports a compatibility condition instead of retrying")
+	})
+}
+
 func TestTranslateAzureOpenAIAPIFormat(t *testing.T) {
 	responses := v1alpha3.OpenAIAPIFormatResponses
 	got, _, err := translateModel(&translator.ResolvedModelConfig{Config: &v1alpha3.ModelConfig{

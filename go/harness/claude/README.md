@@ -20,7 +20,7 @@ harness.
 
 ## Working
 
-- [x] Anthropic API keys and Amazon Bedrock bearer tokens, injected by the gateway
+- [x] Anthropic API keys, Claude subscription OAuth tokens (`anthropic.credentialType: OAuthToken`), and Amazon Bedrock bearer tokens, injected by the gateway
 - [x] Streaming text, tool calls, and tool results over A2A
 - [x] Task cancellation
 - [x] Durable Claude session resume between turns
