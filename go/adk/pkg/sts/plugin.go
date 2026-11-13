@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,16 +131,19 @@ func subjectKey(token string) string {
 
 // cacheKey scopes a cache entry to both the session and the acting subject so a
 // session that carries messages from multiple subjects keeps one exchanged
-// token per subject rather than collapsing to whichever arrived first.
+// token per subject rather than collapsing to whichever arrived first. target
+// names the resources and audiences of a per-server exchange; it is empty for
+// the session's shared token.
 type cacheKey struct {
 	sessionID string
 	subject   string
+	target    string
 }
 
 // getCachedToken retrieves a valid cached token for the session and subject. It
 // returns a copy, so no caller holds the cached entry once the lock is released
 // and a concurrent touch cannot write fields a caller is reading.
-func (p *TokenPropagationPlugin) getCachedToken(sessionID, subject string) (TokenCacheEntry, bool) {
+func (p *TokenPropagationPlugin) getCachedToken(sessionID, subject, target string) (TokenCacheEntry, bool) {
 	// An empty subject identifies no principal, so it must never match an entry.
 	if subject == "" {
 		return TokenCacheEntry{}, false
@@ -149,7 +154,7 @@ func (p *TokenPropagationPlugin) getCachedToken(sessionID, subject string) (Toke
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	entry, ok := p.tokenCache[cacheKey{sessionID: sessionID, subject: subject}]
+	entry, ok := p.tokenCache[cacheKey{sessionID: sessionID, subject: subject, target: target}]
 	if !ok {
 		return TokenCacheEntry{}, false
 	}
@@ -242,8 +247,8 @@ func (p *TokenPropagationPlugin) evictLeastRecentlyUsed(keys []cacheKey, overflo
 		"bound", bound, "dropped", overflow)
 }
 
-// setCachedToken caches a token for the session and subject.
-func (p *TokenPropagationPlugin) setCachedToken(sessionID, subject, token string, expiry int64) {
+// setCachedToken caches a token for the session, subject, and target.
+func (p *TokenPropagationPlugin) setCachedToken(sessionID, subject, target, token string, expiry int64) {
 	// An empty subject identifies no principal, so an entry stored under it would
 	// be shared by every credential-less caller in the session.
 	if subject == "" {
@@ -256,7 +261,7 @@ func (p *TokenPropagationPlugin) setCachedToken(sessionID, subject, token string
 	// evictAfter defaults to Expiry; touch supplies the synthetic bound when
 	// nothing states an expiry, so every entry stays evictable.
 	entry := &TokenCacheEntry{Token: token, Expiry: expiry, evictAfter: expiry}
-	p.tokenCache[cacheKey{sessionID: sessionID, subject: subject}] = entry
+	p.tokenCache[cacheKey{sessionID: sessionID, subject: subject, target: target}] = entry
 	p.touch(entry)
 
 	p.evictOverSessionCapacity(sessionID)
@@ -330,7 +335,7 @@ func (p *TokenPropagationPlugin) BeforeRunCallback(ctx agent.InvocationContext) 
 	subject := subjectKey(bearerToken)
 
 	// Check if we already have a valid cached token for this session and subject.
-	if entry, ok := p.getCachedToken(sessionID, subject); ok {
+	if entry, ok := p.getCachedToken(sessionID, subject, ""); ok {
 		// Nothing on this path states an expiry for an opaque credential, and
 		// time.Unix(0, 0) would report the epoch as a deadline decades past.
 		if entry.Expiry == 0 {
@@ -375,31 +380,63 @@ func (p *TokenPropagationPlugin) BeforeRunCallback(ctx agent.InvocationContext) 
 			return nil, nil
 		}
 
-		// Cache the exchanged token.
-		exchangedToken := resp.AccessToken
-		expiry := int64(0)
-		if resp.ExpiresIn > 0 {
-			expiry = time.Now().Unix() + int64(resp.ExpiresIn)
-		} else {
-			// Fall back to JWT exp claim for cache TTL.
-			expiry = extractJWTExpiry(exchangedToken)
-		}
-		// The entry is keyed by the caller's credential, so it must not outlive
-		// it, nor the subject token the exchange rests on: replaying an expired
-		// credential would otherwise keep hitting a cached delegated token
-		// instead of reaching the STS.
-		expiry = earlierExpiry(expiry, extractJWTExpiry(subjectToken))
-		expiry = earlierExpiry(expiry, extractJWTExpiry(bearerToken))
-		p.setCachedToken(sessionID, subject, exchangedToken, expiry)
+		p.setCachedToken(sessionID, subject, "", resp.AccessToken, exchangedExpiry(resp, subjectToken, bearerToken))
 		p.logger.Info("successfully exchanged and cached STS token", "session_id", sessionID)
 	} else {
 		// No STS integration — cache the raw subject token for header injection.
 		expiry := earlierExpiry(extractJWTExpiry(subjectToken), extractJWTExpiry(bearerToken))
-		p.setCachedToken(sessionID, subject, subjectToken, expiry)
+		p.setCachedToken(sessionID, subject, "", subjectToken, expiry)
 		p.logger.Debug("cached subject token (no STS exchange)", "session_id", sessionID)
 	}
 
 	return nil, nil
+}
+
+// exchangedExpiry is when a cached exchanged token stops being usable.
+func exchangedExpiry(resp *TokenExchangeResponse, subjectToken, bearerToken string) int64 {
+	expiry := extractJWTExpiry(resp.AccessToken)
+	if resp.ExpiresIn > 0 {
+		expiry = time.Now().Unix() + int64(resp.ExpiresIn)
+	}
+	// The entry is keyed by the caller's credential, so it must not outlive
+	// it, nor the subject token the exchange rests on: replaying an expired
+	// credential would otherwise keep hitting a cached delegated token
+	// instead of reaching the STS.
+	expiry = earlierExpiry(expiry, extractJWTExpiry(subjectToken))
+	return earlierExpiry(expiry, extractJWTExpiry(bearerToken))
+}
+
+// ExchangeFor returns a token for one MCP server, exchanged from the caller's
+// bearer token for that server's resources and audiences. It never returns the
+// caller's own token, so a missing STS, caller token, or exchange is an error.
+func (p *TokenPropagationPlugin) ExchangeFor(ctx context.Context, resource, audience []string) (string, error) {
+	if p.integration == nil {
+		return "", errors.New("MCP token exchange requires an STS")
+	}
+	bearerToken := models.BearerTokenFromContext(ctx)
+	subject := subjectKey(bearerToken)
+	if subject == "" {
+		return "", errors.New("MCP token exchange requires a caller bearer token")
+	}
+	sessionID := models.SessionIDFromContext(ctx)
+	target := strings.Join(resource, "\n") + "\x00" + strings.Join(audience, "\n")
+	if entry, ok := p.getCachedToken(sessionID, subject, target); ok {
+		return entry.Token, nil
+	}
+	subjectToken := p.integration.GetSubjectToken(bearerToken)
+	actorToken, err := p.actorTokenForExchange(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch actor token for MCP token exchange: %w", err)
+	}
+	resp, err := p.integration.ExchangeTokenWithActorToken(ctx, subjectToken, TokenTypeJWT, actorToken, resource, audience, "", "")
+	if err != nil {
+		return "", fmt.Errorf("failed to exchange token for MCP server: %w", err)
+	}
+	if resp.AccessToken == "" || resp.AccessToken == bearerToken {
+		return "", errors.New("STS returned no token for the MCP server")
+	}
+	p.setCachedToken(sessionID, subject, target, resp.AccessToken, exchangedExpiry(resp, subjectToken, bearerToken))
+	return resp.AccessToken, nil
 }
 
 // AfterRunCallback is called after the ADK run finishes.
@@ -450,7 +487,7 @@ func (p *TokenPropagationPlugin) HeaderProvider(ctx context.Context) map[string]
 		return nil
 	}
 
-	entry, ok := p.getCachedToken(sessionID, subject)
+	entry, ok := p.getCachedToken(sessionID, subject, "")
 	if !ok {
 		// The caller is identified but has no usable entry, so this request loses
 		// its delegated identity. Reported above debug: nothing else says so.

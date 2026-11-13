@@ -33,7 +33,7 @@ func TestCreateToolsetsDoesNotContactSlowServers(t *testing.T) {
 			case <-r.Context().Done():
 			}
 		}))
-		sets := CreateToolsets(t.Context(), []*configv1.ADKHTTPMCPServerConfig{{Params: &configv1.ADKHTTPConnectionParams{Url: server.URL}}}, nil, nil, false, nil)
+		sets := CreateToolsets(t.Context(), []*configv1.ADKHTTPMCPServerConfig{{Params: &configv1.ADKHTTPConnectionParams{Url: server.URL}}}, nil, nil, false, nil, nil)
 		require.Len(t, sets, 1)
 		require.Zero(t, requests.Load())
 	})

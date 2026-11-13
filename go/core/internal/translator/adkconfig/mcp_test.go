@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	configv1 "github.com/kagent-dev/kagent/go/api/gen/kagent/config/v1"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
@@ -63,4 +64,22 @@ func TestAddRemoteMCPServerTokenPassthrough(t *testing.T) {
 	}
 	require.True(t, config.HttpTools[0].TokenPassthrough)
 	require.True(t, config.SseTools[0].TokenPassthrough)
+}
+
+func TestAddRemoteMCPServerTokenExchange(t *testing.T) {
+	t.Run("Given a RemoteMCPServer with tokenExchange, when it is compiled for the kagent runtime, assert that the exchange requests the server URL as its resource with the configured audiences", func(t *testing.T) {
+		config := &configv1.ADKAgentConfig{}
+		for _, protocol := range []v1alpha3.RemoteMCPServerProtocol{v1alpha3.RemoteMCPServerProtocolStreamableHttp, v1alpha3.RemoteMCPServerProtocolSse} {
+			server := &v1alpha3.RemoteMCPServer{Spec: v1alpha3.RemoteMCPServerSpec{
+				URL: "https://mcp.example.test/mcp", Protocol: protocol, TokenExchange: &v1alpha3.MCPTokenExchange{Audiences: []string{"mcp"}},
+			}}
+
+			require.NoError(t, (&Builder{}).addRemoteMCPServer(config, server, nil, false, nil))
+		}
+
+		want := &configv1.ADKMCPTokenExchange{Resources: []string{"https://mcp.example.test/mcp"}, Audiences: []string{"mcp"}}
+		require.True(t, proto.Equal(want, config.HttpTools[0].GetTokenExchange()))
+		require.True(t, proto.Equal(want, config.SseTools[0].GetTokenExchange()))
+		require.False(t, config.HttpTools[0].TokenPassthrough)
+	})
 }

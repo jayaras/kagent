@@ -16,6 +16,10 @@ func (c *Builder) addRemoteMCPServer(config *configv1.ADKAgentConfig, server *v1
 	if server.Spec.ActorJWT != nil {
 		headers = translator.MCPActorJWTHeaders(headers)
 	}
+	var tokenExchange *configv1.ADKMCPTokenExchange
+	if exchange := server.Spec.TokenExchange; exchange != nil {
+		tokenExchange = &configv1.ADKMCPTokenExchange{Resources: []string{targetURL}, Audiences: exchange.Audiences}
+	}
 
 	switch server.Spec.Protocol {
 	case v1alpha3.RemoteMCPServerProtocolSse:
@@ -29,7 +33,7 @@ func (c *Builder) addRemoteMCPServer(config *configv1.ADKAgentConfig, server *v1
 		params.TlsInsecureSkipVerify = tlsInsecureSkipVerify(server.Spec.TLS)
 		config.SseTools = append(config.SseTools, &configv1.ADKSSEMCPServerConfig{
 			Params: params, Tools: tools, RequireApproval: requireApproval,
-			TokenPassthrough: ptr.Deref(server.Spec.TokenPassthrough, false),
+			TokenPassthrough: ptr.Deref(server.Spec.TokenPassthrough, false), TokenExchange: tokenExchange,
 		})
 	default:
 		params := &configv1.ADKHTTPConnectionParams{Url: targetURL, Headers: headers}
@@ -45,7 +49,7 @@ func (c *Builder) addRemoteMCPServer(config *configv1.ADKAgentConfig, server *v1
 		params.TlsInsecureSkipVerify = tlsInsecureSkipVerify(server.Spec.TLS)
 		config.HttpTools = append(config.HttpTools, &configv1.ADKHTTPMCPServerConfig{
 			Params: params, Tools: tools, RequireApproval: requireApproval,
-			TokenPassthrough: ptr.Deref(server.Spec.TokenPassthrough, false),
+			TokenPassthrough: ptr.Deref(server.Spec.TokenPassthrough, false), TokenExchange: tokenExchange,
 		})
 	}
 

@@ -63,7 +63,7 @@ func TestHeaderProviderUsesSessionIDValue(t *testing.T) {
 	// assert that the header provider returns the delegated authorization.
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
 	bearer := signedTokenWithSub(t, "alice")
-	plugin.setCachedToken("sess-123", subjectKey(bearer), "token-abc", 0)
+	plugin.setCachedToken("sess-123", subjectKey(bearer), "", "token-abc", 0)
 
 	ctx := context.WithValue(context.Background(), kagentmodels.BearerTokenKey, bearer)
 	headers := plugin.HeaderProvider(kagentmodels.WithSessionID(ctx, "sess-123"))
@@ -103,7 +103,7 @@ func TestHeaderProviderPreservesSessionAcrossContextWrappers(t *testing.T) {
 	for _, scenario := range scenarios {
 		t.Run("Given a cached delegated token, when the context gains "+scenario.name+", assert that its authorization survives", func(t *testing.T) {
 			plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-			plugin.setCachedToken(sessionID, subjectKey(bearer), delegated, 0)
+			plugin.setCachedToken(sessionID, subjectKey(bearer), "", delegated, 0)
 			ctx := context.WithValue(t.Context(), kagentmodels.BearerTokenKey, bearer)
 			ctx = scenario.wrap(t, kagentmodels.WithSessionID(ctx, sessionID))
 			require.Equal(t, "Bearer "+delegated, plugin.HeaderProvider(ctx)["Authorization"])
@@ -118,10 +118,10 @@ func TestHeaderProviderIsolatesWrappedRequests(t *testing.T) {
 	const alice = "alice-token"
 	const bob = "bob-token"
 	const expired = "expired-token"
-	plugin.setCachedToken(firstSession, subjectKey(alice), "first-alice", 0)
-	plugin.setCachedToken(firstSession, subjectKey(bob), "first-bob", 0)
-	plugin.setCachedToken(secondSession, subjectKey(alice), "second-alice", 0)
-	plugin.setCachedToken(firstSession, subjectKey(expired), "expired-delegation", time.Now().Add(-time.Hour).Unix())
+	plugin.setCachedToken(firstSession, subjectKey(alice), "", "first-alice", 0)
+	plugin.setCachedToken(firstSession, subjectKey(bob), "", "first-bob", 0)
+	plugin.setCachedToken(secondSession, subjectKey(alice), "", "second-alice", 0)
+	plugin.setCachedToken(firstSession, subjectKey(expired), "", "expired-delegation", time.Now().Add(-time.Hour).Unix())
 
 	scenarios := []struct {
 		name      string
@@ -460,7 +460,7 @@ func TestHeaderProviderNoBearerDoesNotLeakSubjectToken(t *testing.T) {
 	t.Parallel()
 
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-	plugin.setCachedToken("sess-x", subjectOf("alice"), "alice-token", 0)
+	plugin.setCachedToken("sess-x", subjectOf("alice"), "", "alice-token", 0)
 
 	headers := plugin.HeaderProvider(kagentmodels.WithSessionID(context.Background(), "sess-x"))
 
@@ -475,12 +475,12 @@ func TestEmptySubjectIsNotCacheable(t *testing.T) {
 	t.Parallel()
 
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-	plugin.setCachedToken("sess-x", "", "anonymous-token", 0)
+	plugin.setCachedToken("sess-x", "", "", "anonymous-token", 0)
 
 	if len(plugin.tokenCache) != 0 {
 		t.Fatalf("expected empty subject not to be cached, got %d entries", len(plugin.tokenCache))
 	}
-	if _, ok := plugin.getCachedToken("sess-x", ""); ok {
+	if _, ok := plugin.getCachedToken("sess-x", "", ""); ok {
 		t.Fatal("expected no cache hit for an empty subject")
 	}
 }
@@ -516,9 +516,9 @@ func TestCachedTokenWithoutExpiryStaysEvictable(t *testing.T) {
 	t.Parallel()
 
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-	plugin.setCachedToken("sess-ttl", subjectOf("alice"), "opaque-token", 0)
+	plugin.setCachedToken("sess-ttl", subjectOf("alice"), "", "opaque-token", 0)
 
-	entry, ok := plugin.getCachedToken("sess-ttl", subjectOf("alice"))
+	entry, ok := plugin.getCachedToken("sess-ttl", subjectOf("alice"), "")
 	if !ok {
 		t.Fatal("expected a cached entry")
 	}
@@ -546,7 +546,7 @@ func TestSweepKeepsAnInFlightCallerStillUsingItsEntry(t *testing.T) {
 
 	// An opaque credential states no expiry, so the entry carries only the
 	// synthetic eviction bound.
-	plugin.setCachedToken(sessionID, subjectKey(bearer), "delegated-opaque", 0)
+	plugin.setCachedToken(sessionID, subjectKey(bearer), "", "delegated-opaque", 0)
 
 	// The bound comes due while the run is still in flight.
 	due := time.Now().Add(-time.Minute).Unix()
@@ -573,7 +573,7 @@ func TestSweepEvictsAnIdleEntryWithoutExpiry(t *testing.T) {
 	t.Parallel()
 
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-	plugin.setCachedToken("sess-idle", subjectOf("alice"), "opaque-token", 0)
+	plugin.setCachedToken("sess-idle", subjectOf("alice"), "", "opaque-token", 0)
 
 	due := time.Now().Add(-time.Minute).Unix()
 	plugin.tokenCache[cacheKey{sessionID: "sess-idle", subject: subjectOf("alice")}].evictAfter = due
@@ -594,7 +594,7 @@ func TestSessionCapacityBoundKeepsTheEntryOfAnInFlightCaller(t *testing.T) {
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
 	const sessionID = "sess-burst"
 	const bearer = "opaque-alice"
-	plugin.setCachedToken(sessionID, subjectKey(bearer), "delegated-alice", 0)
+	plugin.setCachedToken(sessionID, subjectKey(bearer), "", "delegated-alice", 0)
 
 	ctx := context.WithValue(context.Background(), kagentmodels.BearerTokenKey, bearer)
 	toolCall := kagentmodels.WithSessionID(ctx, sessionID)
@@ -606,7 +606,7 @@ func TestSessionCapacityBoundKeepsTheEntryOfAnInFlightCaller(t *testing.T) {
 		if got := plugin.HeaderProvider(toolCall)["Authorization"]; got != "Bearer delegated-alice" {
 			t.Fatalf("in-flight tool call %d got Authorization %q", i, got)
 		}
-		plugin.setCachedToken(sessionID, subjectKey(fmt.Sprintf("token-%d", i)), "delegated", 0)
+		plugin.setCachedToken(sessionID, subjectKey(fmt.Sprintf("token-%d", i)), "", "delegated", 0)
 	}
 
 	if len(plugin.tokenCache) != maxEntriesPerSession {
@@ -634,10 +634,10 @@ func TestSessionCapacityBoundSparesOtherSessions(t *testing.T) {
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
 	const victimSession = "sess-victim"
 	const victimBearer = "opaque-victim"
-	plugin.setCachedToken(victimSession, subjectKey(victimBearer), "delegated-victim", 0)
+	plugin.setCachedToken(victimSession, subjectKey(victimBearer), "", "delegated-victim", 0)
 
 	for i := range maxEntriesPerSession * 4 {
-		plugin.setCachedToken("sess-flood", subjectKey(fmt.Sprintf("token-%d", i)), "delegated", 0)
+		plugin.setCachedToken("sess-flood", subjectKey(fmt.Sprintf("token-%d", i)), "", "delegated", 0)
 	}
 
 	ctx := context.WithValue(context.Background(), kagentmodels.BearerTokenKey, victimBearer)
@@ -658,7 +658,7 @@ func TestCacheCapacityBoundCapsEverySession(t *testing.T) {
 		for i := range maxEntriesPerSession {
 			plugin.setCachedToken(
 				fmt.Sprintf("sess-%d", session),
-				subjectKey(fmt.Sprintf("token-%d-%d", session, i)),
+				subjectKey(fmt.Sprintf("token-%d-%d", session, i)), "",
 				"delegated", 0,
 			)
 		}
@@ -677,15 +677,15 @@ func TestAfterRunCallbackEvictsExpiredEntriesOfOtherSubjects(t *testing.T) {
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
 	past := time.Now().Add(-time.Hour).Unix()
 	future := time.Now().Add(time.Hour).Unix()
-	plugin.setCachedToken("sess-a", subjectOf("alice"), "alice-token", past)
-	plugin.setCachedToken("sess-b", subjectOf("bob"), "bob-token", future)
+	plugin.setCachedToken("sess-a", subjectOf("alice"), "", "alice-token", past)
+	plugin.setCachedToken("sess-b", subjectOf("bob"), "", "bob-token", future)
 
 	plugin.AfterRunCallback(&fakeInvocationContext{Context: context.Background(), sessionID: "sess-b"})
 
-	if _, ok := plugin.getCachedToken("sess-a", subjectOf("alice")); ok {
+	if _, ok := plugin.getCachedToken("sess-a", subjectOf("alice"), ""); ok {
 		t.Fatal("expired entry of another session/subject must be evicted")
 	}
-	if _, ok := plugin.getCachedToken("sess-b", subjectOf("bob")); !ok {
+	if _, ok := plugin.getCachedToken("sess-b", subjectOf("bob"), ""); !ok {
 		t.Fatal("unexpired entry must survive the sweep")
 	}
 }
@@ -694,14 +694,14 @@ func TestClearCacheDropsEveryEntry(t *testing.T) {
 	t.Parallel()
 
 	plugin := NewTokenPropagationPlugin(nil, slog.New(slog.DiscardHandler), nil, nil)
-	plugin.setCachedToken("sess-a", subjectOf("alice"), "alice-token", time.Now().Add(time.Hour).Unix())
-	plugin.setCachedToken("sess-b", subjectOf("bob"), "bob-token", 0)
+	plugin.setCachedToken("sess-a", subjectOf("alice"), "", "alice-token", time.Now().Add(time.Hour).Unix())
+	plugin.setCachedToken("sess-b", subjectOf("bob"), "", "bob-token", 0)
 	plugin.ClearCache()
 
 	if len(plugin.tokenCache) != 0 {
 		t.Fatalf("cache holds %d entries, want none after ClearCache", len(plugin.tokenCache))
 	}
-	if _, ok := plugin.getCachedToken("sess-a", subjectOf("alice")); ok {
+	if _, ok := plugin.getCachedToken("sess-a", subjectOf("alice"), ""); ok {
 		t.Fatal("expected no cache hit after ClearCache")
 	}
 }
@@ -758,7 +758,7 @@ func TestCachedEntryDoesNotOutliveTheCallerCredential(t *testing.T) {
 		t.Fatalf("BeforeRunCallback() error = %v", err)
 	}
 
-	entry, ok := plugin.getCachedToken(sessionID, subjectKey(bearer))
+	entry, ok := plugin.getCachedToken(sessionID, subjectKey(bearer), "")
 	if !ok {
 		t.Fatal("expected a cached entry after the exchange")
 	}

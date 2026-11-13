@@ -39,6 +39,9 @@ func (c *Compiler) Compile(ctx context.Context, input *translator.HarnessInput) 
 	if err != nil {
 		return nil, err
 	}
+	if usesMCPTokenExchange(compiled.Config) && c.settings.GetTokenPropagation().GetStsWellKnownUri() == "" {
+		return nil, translator.NewValidationError("RemoteMCPServer tokenExchange requires runtimeDefaults.tokenPropagation.stsWellKnownUri")
+	}
 	template, harness := input.Root.Template, input.Harness
 	configJSON, err := runtimeconfig.Marshal(&configv1.ADKConfig{
 		Runtime: translator.RuntimeConfig(c.settings, input.AgentName, template.Namespace),
@@ -80,6 +83,20 @@ func (c *Compiler) Compile(ctx context.Context, input *translator.HarnessInput) 
 		WorkerPoolName: harness.Spec.Substrate.WorkerPoolRef.Name, SnapshotLocation: harness.Spec.Substrate.SnapshotPolicy.Location,
 		TokenPassthroughTargets: tokenPassthroughTargets, Credentials: credentials, Provenance: provenance, EgressDestinations: compiled.Egress,
 	}}, nil
+}
+
+func usesMCPTokenExchange(agent *configv1.ADKAgentConfig) bool {
+	for _, tool := range agent.GetHttpTools() {
+		if tool.GetTokenExchange() != nil {
+			return true
+		}
+	}
+	for _, tool := range agent.GetSseTools() {
+		if tool.GetTokenExchange() != nil {
+			return true
+		}
+	}
+	return slices.ContainsFunc(agent.GetSubAgents(), usesMCPTokenExchange)
 }
 
 // agentCard is the managed card plus the capabilities only the kagent ADK

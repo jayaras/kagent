@@ -558,3 +558,26 @@ def test_mcp_token_passthrough_not_implemented():
 
     with pytest.raises(NotImplementedError, match="token passthrough"):
         create_agent(config, "test_agent")
+
+
+def test_mcp_token_exchange_not_implemented():
+    """Python ADK must refuse token exchange servers rather than connect with the caller's token."""
+    from kagent.config.v1.adk_pb2 import ADKHTTPConnectionParams as StreamableHTTPConnectionParams
+    from kagent.config.v1.adk_pb2 import ADKMCPTokenExchange
+
+    from kagent.adk.types import HttpMcpServerConfig
+
+    config = AgentConfig(
+        model=ModelConfig(model="gpt-3.5-turbo", openai=OpenAI()),
+        description="Test agent",
+        instruction="You are a test agent",
+        http_tools=[
+            HttpMcpServerConfig(
+                params=StreamableHTTPConnectionParams(url="http://test-mcp-server.kagent:8084/mcp"),
+                token_exchange=ADKMCPTokenExchange(resources=["http://test-mcp-server.kagent:8084/mcp"]),
+            )
+        ],
+    )
+
+    with pytest.raises(NotImplementedError, match="token exchange"):
+        create_agent(config, "test_agent")

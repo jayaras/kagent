@@ -45,6 +45,9 @@ func (c *Compiler) compileMCP(
 		if ptr.Deref(server.Spec.TokenPassthrough, false) {
 			return mcpCompilation{}, translator.NewValidationError("Claude does not support RemoteMCPServer %q tokenPassthrough", server.Name)
 		}
+		if server.Spec.TokenExchange != nil {
+			return mcpCompilation{}, translator.NewValidationError("Claude does not support RemoteMCPServer %q tokenExchange", server.Name)
+		}
 		name := translator.MCPRuntimeName(namespace, server)
 		if previous, exists := identities[name]; exists {
 			return mcpCompilation{}, translator.NewValidationError("Claude MCP servers %q and %q map to the same native name %q", previous, server.Name, name)

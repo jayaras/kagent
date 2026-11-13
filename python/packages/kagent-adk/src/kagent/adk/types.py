@@ -308,6 +308,8 @@ def create_agent(
     for mcp_tool in [*config.http_tools, *config.sse_tools]:
         if mcp_tool.token_passthrough:
             raise NotImplementedError("MCP token passthrough is not yet supported by the Python ADK")
+        if mcp_tool.HasField("token_exchange"):
+            raise NotImplementedError("MCP token exchange is not yet supported by the Python ADK")
     if config.http_tools:
         for http_tool in config.http_tools:  # add http tools
             # Install a TLS-aware httpx_client_factory on the params

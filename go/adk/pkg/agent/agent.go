@@ -69,10 +69,12 @@ func createGoogleADKAgent(ctx context.Context, agentConfig *configv1.ADKAgentCon
 
 	propagateToken := runtime.GetTokenPropagation().GetEnabled()
 	var dynamicHeaderProvider mcp.DynamicHeaderProvider
+	var exchanger mcp.TokenExchanger
 	if stsPlugin != nil {
 		dynamicHeaderProvider = stsPlugin.HeaderProvider
+		exchanger = stsPlugin.ExchangeFor
 	}
-	toolsets := mcp.CreateToolsets(ctx, agentConfig.HttpTools, agentConfig.SseTools, agentConfig.StdioTools, propagateToken, dynamicHeaderProvider)
+	toolsets := mcp.CreateToolsets(ctx, agentConfig.HttpTools, agentConfig.SseTools, agentConfig.StdioTools, propagateToken, dynamicHeaderProvider, exchanger)
 	skillsDirectory := agentConfig.SkillsDirectory
 	builtinTools := runtime.GetBuiltinTools()
 	executionTools, err := tools.NewBuiltinTools(tools.BuiltinToolsConfig{

@@ -192,7 +192,7 @@ func TestMCPAppCompactionPreservesCacheApprovalAndHistoricalResults(t *testing.T
 	})
 	srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{Stateless: true}))
 	t.Cleanup(func() { srv.CloseClientConnections(); srv.Close() })
-	sets := mcp.CreateToolsets(t.Context(), []*configv1.ADKHTTPMCPServerConfig{{Params: &configv1.ADKHTTPConnectionParams{Url: srv.URL}, RequireApproval: true}}, nil, nil, false, nil)
+	sets := mcp.CreateToolsets(t.Context(), []*configv1.ADKHTTPMCPServerConfig{{Params: &configv1.ADKHTTPConnectionParams{Url: srv.URL}, RequireApproval: true}}, nil, nil, false, nil, nil)
 	require.Len(t, sets, 1)
 	ctx := &appCompactionContext{StrictContextMock: adkagent.NewStrictContextMock(t.Context()), confirmed: true}
 	callback := makeMCPAppModelResultCallback(func(ctx adkagent.Context) map[string]bool {

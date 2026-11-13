@@ -118,7 +118,9 @@ claims only select the verifier; TokenReview establishes identity and authority.
 
 Direct machine callers intentionally forward their verified inbound token, like
 human callers. That token retains its Kagent authority wherever it is forwarded;
-passthrough destinations must be trusted with it. An embedding application's
+passthrough destinations must be trusted with it. A RemoteMCPServer with
+`tokenExchange` receives a token exchanged for it instead; see
+[credential injection](credential-injection.md#mcp-token-exchange). An embedding application's
 `UpstreamAuth` hook may replace or suppress the credential. Forwarding within a
 request reuses its verified credential and checks expiry locally.
 

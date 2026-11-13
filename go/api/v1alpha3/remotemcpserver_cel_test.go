@@ -88,3 +88,30 @@ func testMCPCredentialHeaderValidation(t *testing.T, cl ctrlclient.Client, names
 		require.ErrorContains(t, cl.Update(t.Context(), server), "must have at most 64 items")
 	})
 }
+
+func testMCPTokenExchangeValidation(t *testing.T, cl ctrlclient.Client, namespace string) {
+	t.Helper()
+	exchange := &MCPTokenExchange{Audiences: []string{"mcp"}}
+	for _, scenario := range []struct {
+		name   string
+		spec   RemoteMCPServerSpec
+		reject string
+	}{
+		{"Given a RemoteMCPServer, when it sets tokenExchange alone, assert that admission accepts it", RemoteMCPServerSpec{TokenExchange: exchange}, ""},
+		{"Given a RemoteMCPServer, when it sets tokenExchange and tokenPassthrough, assert that admission rejects it", RemoteMCPServerSpec{TokenExchange: exchange, TokenPassthrough: new(true)}, "at most one of the fields in [actorJwt tokenPassthrough tokenExchange] may be set"},
+		{"Given a RemoteMCPServer, when it sets tokenExchange and actorJwt, assert that admission rejects it", RemoteMCPServerSpec{TokenExchange: exchange, ActorJWT: &ActorJWT{Audiences: []string{"mcp"}}}, "at most one of the fields in [actorJwt tokenPassthrough tokenExchange] may be set"},
+		{"Given a RemoteMCPServer, when it sets tokenExchange and an Authorization header, assert that admission rejects it", RemoteMCPServerSpec{TokenExchange: exchange, HeadersFrom: []ValueRef{{Name: "authorization", Value: "Bearer static"}}}, "headersFrom cannot set Authorization when tokenExchange is set"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			scenario.spec.Description, scenario.spec.URL = "MCP token exchange validation", "https://mcp.example.com/mcp"
+
+			err := cl.Create(t.Context(), &RemoteMCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, GenerateName: "mcp-token-exchange-"}, Spec: scenario.spec})
+
+			if scenario.reject == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, scenario.reject)
+			}
+		})
+	}
+}

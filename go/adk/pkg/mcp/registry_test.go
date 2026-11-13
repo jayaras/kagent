@@ -140,7 +140,7 @@ func checkSTSDelegatedTokenReachesMCP(t *testing.T, transport string) {
 	} else {
 		httpTools = []*configv1.ADKHTTPMCPServerConfig{{Params: &configv1.ADKHTTPConnectionParams{Url: mcpServer.URL, Timeout: durationpb.New(5 * time.Second)}}}
 	}
-	toolsets := CreateToolsets(t.Context(), httpTools, sseTools, nil, false, plugin.HeaderProvider)
+	toolsets := CreateToolsets(t.Context(), httpTools, sseTools, nil, false, plugin.HeaderProvider, nil)
 	require.Len(t, toolsets, 1)
 	inner := toolsets[0].(*mcpAppToolset).inner.(*scopedToolset).Toolset
 	closer := inner.(io.Closer)

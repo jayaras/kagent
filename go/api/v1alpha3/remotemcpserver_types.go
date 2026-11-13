@@ -29,11 +29,24 @@ const (
 	RemoteMCPServerProtocolStreamableHttp RemoteMCPServerProtocol = "STREAMABLE_HTTP"
 )
 
+// MCPTokenExchange configures the token a RemoteMCPServer receives through
+// token exchange.
+type MCPTokenExchange struct {
+	// Audiences adds RFC 8693 audience values to the exchange request.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=512
+	Audiences []string `json:"audiences,omitempty"`
+}
+
 // RemoteMCPServerSpec defines the desired state of RemoteMCPServer.
 //
 // +kubebuilder:validation:XValidation:message="spec.tls must be unset when spec.url has http:// scheme: a TLS opinion contradicts a plaintext URL. Either drop spec.tls, or use https:// / a scheme-less URL.",rule="!self.url.startsWith('http://') || !has(self.tls)"
 // +kubebuilder:validation:XValidation:message="headersFrom cannot set Authorization when tokenPassthrough is enabled",rule="!(has(self.tokenPassthrough) && self.tokenPassthrough) || !has(self.headersFrom) || !self.headersFrom.exists(h, h.name.lowerAscii() == 'authorization')"
-// +kubebuilder:validation:AtMostOneOf=actorJwt;tokenPassthrough
+// +kubebuilder:validation:AtMostOneOf=actorJwt;tokenPassthrough;tokenExchange
+// +kubebuilder:validation:XValidation:message="headersFrom cannot set Authorization when tokenExchange is set",rule="!has(self.tokenExchange) || !has(self.headersFrom) || !self.headersFrom.exists(h, h.name.lowerAscii() == 'authorization')"
 // +kubebuilder:validation:XValidation:message="headersFrom cannot set Authorization when actorJwt is enabled",rule="!has(self.actorJwt) || !has(self.headersFrom) || !self.headersFrom.exists(h, h.name.lowerAscii() == 'authorization')"
 type RemoteMCPServerSpec struct {
 	// ActorJWT authenticates as the executing Actor with Authorization: Bearer.
@@ -63,6 +76,15 @@ type RemoteMCPServerSpec struct {
 	// require one should disable discovery with the kagent.dev/discovery label.
 	// +optional
 	TokenPassthrough *bool `json:"tokenPassthrough,omitempty"`
+	// TokenExchange sends this server a token issued for it, instead of the
+	// caller's token. The runtime exchanges the caller's bearer token at the STS
+	// in runtimeDefaults.tokenPropagation.stsWellKnownUri (RFC 8693), requesting
+	// this server's URL as the resource (RFC 8707) and any configured audiences.
+	// The caller's own token is never sent to this server: a request fails when
+	// there is no caller token or the exchange fails. Only the Go kagent runtime
+	// supports it.
+	// +optional
+	TokenExchange *MCPTokenExchange `json:"tokenExchange,omitempty"`
 	// +optional
 	// +kubebuilder:default="30s"
 	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s') && duration(self) <= duration('9223372036s')",message="timeout must be positive and at most 9223372036s"

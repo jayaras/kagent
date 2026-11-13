@@ -104,6 +104,42 @@ require one should set the `kagent.dev/discovery: disabled` label. The runtime
 shares one MCP session per server. The standalone SSE stream and session
 teardown therefore carry the token of the caller that opened the session.
 
+### MCP token exchange
+
+`RemoteMCPServer.spec.tokenExchange` sends a server a token issued for that
+server instead of the caller's token:
+
+```yaml
+spec:
+  url: https://mcp.example.com/mcp
+  tokenExchange:
+    audiences: [mcp-example]
+```
+
+The runtime exchanges the caller's bearer token (RFC 8693) at the STS named by
+`runtimeDefaults.tokenPropagation.stsWellKnownUri`. The request names the
+server's `url` as the RFC 8707 `resource` and adds any `audiences`. The STS
+decides whether to issue the token and sets its audience. The runtime caches
+each token by session, caller token, and server, and never past the caller
+token's expiry.
+
+On every request to the server, the runtime replaces `Authorization` with the
+exchanged token. If there is no caller token, no STS, or the exchange fails,
+the runtime sends nothing and the request fails. This also holds when
+`tokenPropagation.enabled` would otherwise forward the caller's token to every
+MCP server. The MCP authorization specification requires a server to reject
+tokens issued for another resource, so a compliant server rejects the caller's
+Kagent token.
+
+The option is mutually exclusive with `tokenPassthrough` and `actorJwt`, and
+`headersFrom` cannot set `Authorization`. Compilation fails when no STS is
+configured. Only the Go kagent runtime implements the option. Claude and Codex
+reject it at compilation, and the Python runtime fails at startup. Controller
+discovery sends no caller token, so set the `kagent.dev/discovery: disabled`
+label on servers that require one. As with passthrough, the shared MCP
+session's event stream carries the token of the caller that opened it. Actor
+egress must allow the STS origin, for example through an EgressPolicy.
+
 ### Gateway token passthrough
 
 Without `app.Options.EgressPolicyCompilers`, runtimes forward the caller token

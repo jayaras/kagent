@@ -352,3 +352,13 @@ func TestCompileMCPRejectsTokenPassthrough(t *testing.T) {
 		t.Fatalf("expected %q, got %v", want, err)
 	}
 }
+
+func TestCompileMCPRejectsTokenExchange(t *testing.T) {
+	server := &v1alpha3.RemoteMCPServer{ObjectMeta: metav1.ObjectMeta{Name: "user"}, Spec: v1alpha3.RemoteMCPServerSpec{
+		URL: "https://mcp.example.com/mcp", TokenExchange: &v1alpha3.MCPTokenExchange{},
+	}}
+	_, err := (&Compiler{}).compileMCP(t.Context(), "team", []translator.ResolvedMCPTool{{Server: server}})
+	if want := "Codex does not support RemoteMCPServer \"user\" tokenExchange"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected %q, got %v", want, err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,10 @@ import (
 // It receives the context and should return a map of headers.
 // This is used for dynamic token injection (e.g., STS tokens) per session.
 type DynamicHeaderProvider func(ctx context.Context) map[string]string
+
+// TokenExchanger returns a token exchanged from the caller's credential for
+// the given resources and audiences. It never returns the caller's own token.
+type TokenExchanger func(ctx context.Context, resource, audience []string) (string, error)
 
 const (
 	// Default timeout for MCP requests.
@@ -74,11 +79,12 @@ func allowedRequestHeaders(ctx context.Context, allowed []string) map[string]str
 type mcpServerParams struct {
 	URL                   string
 	Headers               map[string]string
-	AllowedHeaders        []string              // header names to forward from incoming request
-	PropagateToken        bool                  // when true, Authorization is forwarded independently of AllowedHeaders
-	TokenPassthrough      bool                  // when true, Authorization is always the caller's bearer token
-	HeaderProvider        DynamicHeaderProvider // optional per-request headers derived from invocation context (e.g., STS exchanged access tokens)
-	ServerType            string                // "http" or "sse"
+	AllowedHeaders        []string                              // header names to forward from incoming request
+	PropagateToken        bool                                  // when true, Authorization is forwarded independently of AllowedHeaders
+	TokenPassthrough      bool                                  // when true, Authorization is always the caller's bearer token
+	HeaderProvider        DynamicHeaderProvider                 // optional per-request headers derived from invocation context (e.g., STS exchanged access tokens)
+	TokenExchange         func(context.Context) (string, error) // when set, Authorization is always a token exchanged for this server
+	ServerType            string                                // "http" or "sse"
 	Command               string
 	Args                  []string
 	Env                   map[string]string
@@ -101,6 +107,8 @@ type mcpServerParams struct {
 //
 // Optional headerProvider can be used to inject per-request headers
 // derived from invocation context (e.g., STS exchanged access tokens).
+// exchanger serves servers configured with token_exchange; when it is nil,
+// their requests fail.
 func CreateToolsets(
 	ctx context.Context,
 	httpTools []*configv1.ADKHTTPMCPServerConfig,
@@ -108,6 +116,7 @@ func CreateToolsets(
 	stdioTools []*configv1.ADKStdioMCPServerConfig,
 	propagateToken bool,
 	headerProvider DynamicHeaderProvider,
+	exchanger TokenExchanger,
 ) []tool.Toolset {
 	log := logging.FromContext(ctx)
 	var toolsets []tool.Toolset
@@ -133,6 +142,7 @@ func CreateToolsets(
 			PropagateToken:        propagateToken,
 			TokenPassthrough:      httpTool.TokenPassthrough,
 			HeaderProvider:        headerProvider,
+			TokenExchange:         tokenExchange(httpTool.GetTokenExchange(), exchanger),
 			ServerType:            "http",
 			Timeout:               httpTool.Params.Timeout,
 			SseReadTimeout:        httpTool.Params.SseReadTimeout,
@@ -156,6 +166,7 @@ func CreateToolsets(
 			PropagateToken:        propagateToken,
 			TokenPassthrough:      sseTool.TokenPassthrough,
 			HeaderProvider:        headerProvider,
+			TokenExchange:         tokenExchange(sseTool.GetTokenExchange(), exchanger),
 			ServerType:            "sse",
 			Timeout:               sseTool.Params.Timeout,
 			SseReadTimeout:        sseTool.Params.SseReadTimeout,
@@ -171,6 +182,19 @@ func CreateToolsets(
 	}
 
 	return toolsets
+}
+
+// tokenExchange binds a server's exchange request to the exchanger.
+func tokenExchange(config *configv1.ADKMCPTokenExchange, exchanger TokenExchanger) func(context.Context) (string, error) {
+	if config == nil {
+		return nil
+	}
+	return func(ctx context.Context) (string, error) {
+		if exchanger == nil {
+			return "", errors.New("MCP token exchange requires runtime.token_propagation.sts_well_known_uri")
+		}
+		return exchanger(ctx, config.GetResources(), config.GetAudiences())
+	}
 }
 
 // addToolset logs, initializes, and returns a single MCP toolset.
@@ -265,7 +289,7 @@ func createTransport(ctx context.Context, params mcpServerParams) (mcpsdk.Transp
 	}
 
 	var httpTransport http.RoundTripper = baseTransport
-	if len(params.Headers) > 0 || len(params.AllowedHeaders) > 0 || params.PropagateToken || params.HeaderProvider != nil || params.TokenPassthrough {
+	if len(params.Headers) > 0 || len(params.AllowedHeaders) > 0 || params.PropagateToken || params.HeaderProvider != nil || params.TokenPassthrough || params.TokenExchange != nil {
 		httpTransport = &headerRoundTripper{
 			base:             baseTransport,
 			headers:          params.Headers,
@@ -273,6 +297,7 @@ func createTransport(ctx context.Context, params mcpServerParams) (mcpsdk.Transp
 			propagateToken:   params.PropagateToken,
 			headerProvider:   params.HeaderProvider,
 			tokenPassthrough: params.TokenPassthrough,
+			tokenExchange:    params.TokenExchange,
 		}
 	}
 
@@ -313,7 +338,9 @@ func createTransport(ctx context.Context, params mcpServerParams) (mcpsdk.Transp
 //
 // When tokenPassthrough is set, Authorization is then replaced with the
 // caller's bearer token, and requests without one fail rather than falling
-// back to a weaker credential.
+// back to a weaker credential. When tokenExchange is set, Authorization is
+// replaced with a token exchanged for this server, and a request whose
+// exchange fails is not sent, so the caller's token never reaches it.
 type headerRoundTripper struct {
 	base             http.RoundTripper
 	headers          map[string]string
@@ -321,6 +348,7 @@ type headerRoundTripper struct {
 	propagateToken   bool     // when true, Authorization is forwarded independently
 	headerProvider   DynamicHeaderProvider
 	tokenPassthrough bool
+	tokenExchange    func(context.Context) (string, error)
 }
 
 func (rt *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -364,6 +392,14 @@ func (rt *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		token, ok := models.PassthroughToken(req.Context(), true)
 		if !ok {
 			return nil, fmt.Errorf("MCP token passthrough requires a caller bearer token")
+		}
+		req.Header.Set(constants.AuthorizationHeader, "Bearer "+token)
+	}
+
+	if rt.tokenExchange != nil {
+		token, err := rt.tokenExchange(req.Context())
+		if err != nil {
+			return nil, err
 		}
 		req.Header.Set(constants.AuthorizationHeader, "Bearer "+token)
 	}

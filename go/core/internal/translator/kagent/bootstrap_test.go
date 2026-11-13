@@ -81,3 +81,35 @@ func largeADKInput(rootBytes, children int) *translator.HarnessInput {
 	}
 	return &translator.HarnessInput{AgentName: "large", Root: root, Harness: &translator.HarnessConfiguration{Name: "adk", Namespace: "test", Source: metav1.ObjectMeta{Name: "adk", Namespace: "test"}, Spec: v1alpha3.HarnessSpec{Kagent: &v1alpha3.KagentHarness{}, Substrate: v1alpha3.RuntimeSubstratePolicy{WorkerPoolRef: corev1.LocalObjectReference{Name: "default"}, SnapshotPolicy: v1alpha3.RuntimeSnapshotPolicy{Location: "snapshots"}}}}}
 }
+
+func TestMCPTokenExchangeRequiresSTS(t *testing.T) {
+	scenarios := []struct {
+		name, sts, wantErr string
+	}{
+		{"Given a token-exchange RemoteMCPServer and no STS, when the agent compiles, assert that compilation is rejected", "", "requires runtimeDefaults.tokenPropagation.stsWellKnownUri"},
+		{"Given a token-exchange RemoteMCPServer and an STS, when the agent compiles, assert that compilation succeeds", "https://sts.example.test/.well-known/oauth-authorization-server", ""},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			input := largeADKInput(16, 0)
+			server := &v1alpha3.RemoteMCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "mcp"}, Spec: v1alpha3.RemoteMCPServerSpec{
+				URL: "https://mcp.example.test/mcp", TokenExchange: &v1alpha3.MCPTokenExchange{},
+			}}
+			input.Root.MCPTools = []translator.ResolvedMCPTool{{Binding: v1alpha3.MCPToolBinding{Server: v1alpha3.MCPServerReference{Name: "mcp"}}, Server: server}}
+			settings := testRuntimeDefaults()
+			if scenario.sts != "" {
+				settings.TokenPropagation = &configv1.TokenPropagationConfig{StsWellKnownUri: new(scenario.sts)}
+			}
+
+			_, err := NewCompiler(krt.TestingDummyContext{}, translator.Collections{}, settings).Compile(t.Context(), input)
+
+			if scenario.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				var validation *translator.ValidationError
+				require.ErrorAs(t, err, &validation)
+				require.ErrorContains(t, err, scenario.wantErr)
+			}
+		})
+	}
+}

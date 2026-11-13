@@ -55,7 +55,7 @@ func TestKAgentExecutorScopesMCPDiscoveryFailures(t *testing.T) {
 		Params: &configv1.ADKHTTPConnectionParams{Url: httpServer.URL},
 	}, {
 		Params: &configv1.ADKHTTPConnectionParams{Url: healthyHTTP.URL},
-	}}, nil, nil, false, nil)
+	}}, nil, nil, false, nil, nil)
 	require.Len(t, toolsets, 2)
 
 	var visible [][]string

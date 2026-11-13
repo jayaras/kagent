@@ -39,6 +39,9 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []tra
 		if ptr.Deref(server.Spec.TokenPassthrough, false) {
 			return mcpCompilation{}, translator.NewValidationError("Codex does not support RemoteMCPServer %q tokenPassthrough", server.Name)
 		}
+		if server.Spec.TokenExchange != nil {
+			return mcpCompilation{}, translator.NewValidationError("Codex does not support RemoteMCPServer %q tokenExchange", server.Name)
+		}
 		name := translator.MCPRuntimeName(namespace, server)
 		if previous, ok := identities[name]; ok {
 			return mcpCompilation{}, translator.NewValidationError("Codex MCP servers %q and %q map to the same native name %q", previous, server.Name, name)

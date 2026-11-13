@@ -249,6 +249,27 @@ spec:
                       Production deployments MUST use proper certificates.
                     type: boolean
                 type: object
+              tokenExchange:
+                description: |-
+                  TokenExchange sends this server a token issued for it, instead of the
+                  caller's token. The runtime exchanges the caller's bearer token at the STS
+                  in runtimeDefaults.tokenPropagation.stsWellKnownUri (RFC 8693), requesting
+                  this server's URL as the resource (RFC 8707) and any configured audiences.
+                  The caller's own token is never sent to this server: a request fails when
+                  there is no caller token or the exchange fails. Only the Go kagent runtime
+                  supports it.
+                properties:
+                  audiences:
+                    description: Audiences adds RFC 8693 audience values to the exchange
+                      request.
+                    items:
+                      maxLength: 512
+                      minLength: 1
+                      type: string
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
               tokenPassthrough:
                 description: |-
                   TokenPassthrough forwards the bearer token from the incoming A2A request
@@ -272,12 +293,17 @@ spec:
                 is enabled
               rule: '!(has(self.tokenPassthrough) && self.tokenPassthrough) || !has(self.headersFrom)
                 || !self.headersFrom.exists(h, h.name.lowerAscii() == ''authorization'')'
+            - message: headersFrom cannot set Authorization when tokenExchange is
+                set
+              rule: '!has(self.tokenExchange) || !has(self.headersFrom) || !self.headersFrom.exists(h,
+                h.name.lowerAscii() == ''authorization'')'
             - message: headersFrom cannot set Authorization when actorJwt is enabled
               rule: '!has(self.actorJwt) || !has(self.headersFrom) || !self.headersFrom.exists(h,
                 h.name.lowerAscii() == ''authorization'')'
-            - message: at most one of the fields in [actorJwt tokenPassthrough] may
-                be set
-              rule: (has(self.actorJwt)?1:0)+(has(self.tokenPassthrough)?1:0) <= 1
+            - message: at most one of the fields in [actorJwt tokenPassthrough tokenExchange]
+                may be set
+              rule: (has(self.actorJwt)?1:0)+(has(self.tokenPassthrough)?1:0)+(has(self.tokenExchange)?1:0)
+                <= 1
           status:
             description: RemoteMCPServerStatus defines the observed state of RemoteMCPServer.
             properties:
